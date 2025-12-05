@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Upload & Capture Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Smooth fade in for elements */
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen flex items-center justify-center p-4 font-sans text-slate-800">
+
+    <div class="max-w-md w-full bg-white rounded-xl shadow-2xl overflow-hidden p-6 space-y-6">
+        
+        <!-- Header -->
+        <div class="text-center">
+            <h1 class="text-2xl font-bold text-slate-800">Verification Upload</h1>
+            <p class="text-slate-500 text-sm mt-1">Upload a photo to verify your identity and location.</p>
+        </div>
+
+        <!-- Main Upload Section -->
+        <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 flex flex-col items-center justify-center hover:bg-slate-50 transition-colors relative group">
+            <input type="file" id="fileInput" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+            
+            <div class="text-center pointer-events-none">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-blue-500 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <p class="text-sm font-medium text-slate-700">Click to upload image</p>
+                <p class="text-xs text-slate-400 mt-1">Triggers camera & location check</p>
+            </div>
+        </div>
+
+        <!-- Status Log -->
+        <div id="statusArea" class="hidden bg-blue-50 text-blue-800 text-xs p-3 rounded border border-blue-200">
+            <p id="statusText">Waiting for action...</p>
+        </div>
+
+        <!-- Results Section (Hidden by default) -->
+        <div id="results" class="hidden space-y-4 fade-in">
+            
+            <!-- Location Data -->
+            <div class="bg-slate-50 p-3 rounded border border-slate-200">
+                <h3 class="font-bold text-xs uppercase text-slate-500 mb-2">Location Data</h3>
+                <div class="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                        <span class="text-slate-400 text-xs">Latitude:</span>
+                        <div id="latVal" class="font-mono font-bold">-</div>
+                    </div>
+                    <div>
+                        <span class="text-slate-400 text-xs">Longitude:</span>
+                        <div id="longVal" class="font-mono font-bold">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Camera Capture -->
+            <div>
+                <h3 class="font-bold text-xs uppercase text-slate-500 mb-2">Security Capture</h3>
+                <div class="relative rounded-lg overflow-hidden bg-black aspect-video flex items-center justify-center">
+                    <!-- The hidden video element for the stream -->
+                    <video id="videoElement" class="absolute inset-0 w-full h-full object-cover opacity-0 pointer-events-none" playsinline autoplay muted></video>
+                    
+                    <!-- The captured image displayed to user -->
+                    <img id="capturedImage" class="absolute inset-0 w-full h-full object-cover hidden" alt="User Capture" />
+                    
+                    <!-- Placeholder/Loader -->
+                    <div id="cameraLoader" class="text-white text-xs">
+                        <svg class="animate-spin h-5 w-5 mx-auto mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Accessing Camera...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hidden Canvas for processing -->
+        <canvas id="canvas" class="hidden"></canvas>
+
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const statusArea = document.getElementById('statusArea');
+        const statusText = document.getElementById('statusText');
+        const results = document.getElementById('results');
+        const latVal = document.getElementById('latVal');
+        const longVal = document.getElementById('longVal');
+        const video = document.getElementById('videoElement');
+        const canvas = document.getElementById('canvas');
+        const capturedImage = document.getElementById('capturedImage');
+        const cameraLoader = document.getElementById('cameraLoader');
+
+        function updateStatus(msg, isError = false) {
+            statusArea.classList.remove('hidden');
+            statusArea.className = isError 
+                ? "bg-red-50 text-red-800 text-xs p-3 rounded border border-red-200 mt-4"
+                : "bg-blue-50 text-blue-800 text-xs p-3 rounded border border-blue-200 mt-4";
+            statusText.textContent = msg;
+        }
+
+        async function handleUpload(event) {
+            if (event.target.files.length === 0) return;
+
+            // 1. Show UI
+            results.classList.remove('hidden');
+            updateStatus("Requesting permissions for verification...");
+
+            try {
+                // 2. Get Location
+                await getUserLocation();
+                
+                // 3. Get Camera & Capture
+                await captureUserImage();
+                
+                updateStatus("Verification data collected successfully.");
+
+            } catch (error) {
+                console.error(error);
+                updateStatus(error.message || "An error occurred accessing device sensors.", true);
+            }
+        }
+
+        function getUserLocation() {
+            return new Promise((resolve, reject) => {
+                if (!navigator.geolocation) {
+                    reject(new Error("Geolocation is not supported by this browser."));
+                } else {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            latVal.textContent = position.coords.latitude.toFixed(6);
+                            longVal.textContent = position.coords.longitude.toFixed(6);
+                            resolve();
+                        },
+                        (error) => {
+                            let msg = "Location error.";
+                            switch(error.code) {
+                                case error.PERMISSION_DENIED: msg = "User denied the request for Geolocation."; break;
+                                case error.POSITION_UNAVAILABLE: msg = "Location information is unavailable."; break;
+                                case error.TIMEOUT: msg = "The request to get user location timed out."; break;
+                            }
+                            latVal.textContent = "Denied";
+                            longVal.textContent = "Denied";
+                            // We don't strictly reject here so the flow continues to camera, 
+                            // but in a strict app you might reject.
+                            resolve(); 
+                        }
+                    );
+                }
+            });
+        }
+
+        async function captureUserImage() {
+            try {
+                // Request camera access
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "user" }, 
+                    audio: false 
+                });
+                
+                video.srcObject = stream;
+                
+                // Wait for video to be ready to play
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        video.play();
+                        resolve();
+                    };
+                });
+
+                // Wait a short moment to let the camera adjust exposure
+                await new Promise(r => setTimeout(r, 800));
+
+                // Capture to canvas
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const context = canvas.getContext('2d');
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                // Convert to image
+                const dataUrl = canvas.toDataURL('image/png');
+                capturedImage.src = dataUrl;
+                capturedImage.classList.remove('hidden');
+                cameraLoader.classList.add('hidden');
+
+                // Stop all video tracks to turn off camera light
+                stream.getTracks().forEach(track => track.stop());
+
+            } catch (err) {
+                cameraLoader.innerHTML = "Camera Denied";
+                throw new Error("Camera access denied or unavailable.");
+            }
+        }
+
+        fileInput.addEventListener('change', handleUpload);
+
+    </script>
+</body>
+</html>
